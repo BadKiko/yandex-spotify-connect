@@ -93,7 +93,7 @@ class SpeakerBridge:
                 pass
             self._proc = None
         self.is_playing = False
-        await self.glagol.stop()
+        await self.glagol.pause()
         logger.info(f"[{self.spotify_name}] Bridge stopped.")
 
     async def set_enabled(self, enabled: bool):
@@ -172,4 +172,4 @@ class SpeakerBridge:
             if self.is_playing and time.time() - self.last_audio_time > 20:
                 self.is_playing = False
                 logger.info(f"[{self.spotify_name}] Inactivity detected (>20s), stopping speaker.")
-                await self.glagol.stop()
+                await self.glagol.pause()

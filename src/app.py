@@ -1,6 +1,6 @@
 """
 Main Entry Point for Yandex Spotify Connect.
-Coordinates Zeroconf discovery, Speaker bridges, persistent disabled list, and the HTTP server.
+Coordinates Zeroconf discovery, Speaker bridges, Web setup wizard, and HTTP server.
 """
 
 import asyncio
@@ -53,11 +53,15 @@ class Application:
         self.librespot_bin = self.config.get("librespot_bin", "/app/librespot")
         self.yandex_music_token = self.config.get("yandex_music_token", "")
         
-        # Disabled speakers set (e.g. TV disabled by default)
         disabled_list = self.config.get("disabled_speakers", ["1f82121ab18a11e40ff5"])
         self.disabled_speakers: Set[str] = set(disabled_list)
 
-        self.streamer = StreamServer(port=self.port, on_toggle=self.handle_speaker_toggle)
+        self.streamer = StreamServer(
+            port=self.port,
+            on_toggle=self.handle_speaker_toggle,
+            on_token_update=self.handle_token_update,
+            app_ref=self
+        )
         self.bridges: Dict[str, SpeakerBridge] = {}
         self.discovery: YandexDiscovery = None
         self._running = False
@@ -74,11 +78,21 @@ class Application:
     def _save_config(self):
         try:
             self.config["disabled_speakers"] = list(self.disabled_speakers)
+            self.config["yandex_music_token"] = self.yandex_music_token
             with open(self.config_path, "w", encoding="utf-8") as f:
                 yaml.dump(self.config, f, allow_unicode=True)
-            logger.info("Saved configuration with updated disabled speakers list.")
+            logger.info("Saved configuration file successfully.")
         except Exception as e:
             logger.error(f"Error saving config: {e}")
+
+    async def handle_token_update(self, token: str):
+        """Called when user enters token in Web UI."""
+        self.yandex_music_token = token
+        self._save_config()
+        for bridge in self.bridges.values():
+            bridge.glagol.music_token = token
+            await bridge.glagol.fetch_glagol_token()
+        logger.info("Updated Yandex Music token across all active bridges.")
 
     async def handle_speaker_toggle(self, device_id: str, enable: bool):
         """Called from Web UI when user toggles a speaker on/off."""
@@ -97,7 +111,6 @@ class Application:
         if speaker.device_id in self.bridges:
             return
 
-        # Apply friendly human name override
         name = NAME_OVERRIDES.get(speaker.device_id, speaker.name)
         is_enabled = speaker.device_id not in self.disabled_speakers
 
