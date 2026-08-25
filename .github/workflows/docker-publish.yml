@@ -20,12 +20,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build librespot binary
         run: |
-          cargo install --git https://github.com/librespot-org/librespot.git --tag v0.8.0 --locked --no-default-features --root ./librespot_bin
+          cargo install --git https://github.com/librespot-org/librespot.git --tag v0.8.0 --features with-libmdns --root ./librespot_bin
           cp ./librespot_bin/bin/librespot ./librespot
           chmod +x ./librespot
 
