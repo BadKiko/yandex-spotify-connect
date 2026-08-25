@@ -1,12 +1,13 @@
 """
-HTTP Streaming Server and Modern Web Dashboard with 1-Click Setup Wizard.
-Includes QR Code login, token setup, live speaker controls, and HLS streaming.
+HTTP Streaming Server and Modern Web Dashboard with 100% Automatic OAuth Login.
+Automatically extracts access_token from OAuth callback or pasted URLs with zero manual hassle.
 """
 
 import asyncio
 import json
 import logging
 import os
+import re
 import yaml
 from aiohttp import web
 from typing import Dict
@@ -30,6 +31,8 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             --border: #2c2c2c;
             --danger: #e74c3c;
             --input-bg: #2a2a2a;
+            --yandex: #fc3f1d;
+            --yandex-hover: #e03214;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -138,7 +141,7 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             background: var(--input-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 12px 14px;
             color: #fff;
             font-size: 14px;
             outline: none;
@@ -149,31 +152,54 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             color: #000;
             border: none;
             border-radius: 8px;
-            padding: 10px 20px;
+            padding: 12px 22px;
             font-size: 14px;
             font-weight: 700;
             cursor: pointer;
             transition: background 0.2s ease;
         }
         button:hover { background: var(--accent-hover); }
+        .btn-yandex {
+            background: var(--yandex);
+            color: #fff;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 14px;
+            transition: background 0.2s ease;
+        }
+        .btn-yandex:hover { background: var(--yandex-hover); }
         .qr-section {
             display: flex;
             align-items: center;
             gap: 20px;
-            margin-top: 16px;
-            padding-top: 16px;
+            margin-top: 20px;
+            padding-top: 20px;
             border-top: 1px solid #2c2c2c;
         }
         .qr-img {
-            width: 110px;
-            height: 110px;
+            width: 120px;
+            height: 120px;
             background: #fff;
             border-radius: 8px;
             padding: 6px;
         }
-        .qr-text { font-size: 13px; color: var(--subtext); line-height: 1.4; }
+        .qr-text { font-size: 13px; color: var(--subtext); line-height: 1.5; }
         .qr-link { color: var(--accent); font-weight: 600; text-decoration: none; }
         .qr-link:hover { text-decoration: underline; }
+        .success-toast {
+            background: rgba(29, 185, 84, 0.15);
+            border: 1px solid var(--accent);
+            color: #fff;
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -183,22 +209,33 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             <span class="badge">Standalone</span>
         </header>
 
+        <div id="success-toast" class="success-toast">
+            ✅ Токен успешно получен и сохранён! Колонки подключаются...
+        </div>
+
         <div id="setup-wizard" class="setup-box" style="display: none;">
             <div class="setup-title">🔑 Авторизация Яндекс Станций</div>
             <div class="setup-desc">
-                Для прямой передачи команд на Станции по протоколу Glagol укажите ваш <b>Yandex Music OAuth токен</b>.
+                Для прямой связи с Яндекс Станциями по локальному протоколу Glagol выполните вход через Яндекс:
             </div>
-            <div class="input-group">
-                <input type="text" id="token-input" placeholder="y0_AgAAAAA..." autocomplete="off">
-                <button onclick="saveToken()">Сохранить токен</button>
+
+            <div style="margin-bottom: 16px;">
+                <a id="btn-login-yandex" class="btn-yandex" href="#" target="_blank">
+                    🔴 Войти через Яндекс (Автоматически)
+                </a>
             </div>
+
             <div class="qr-section">
-                <img class="qr-img" id="qr-code" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=https%3A%2F%2Foauth.yandex.ru%2Fauthorize%3Fresponse_type%3Dtoken%26client_id%3D23cabbbdc6cd418abb4b39c32c41195d" alt="QR Code">
+                <img class="qr-img" id="qr-code" src="" alt="QR Code">
                 <div class="qr-text">
-                    <b>Как получить токен в 1 клик:</b><br>
-                    Отсканируйте QR-код камерой телефона или перейдите по ссылке: <br>
-                    <a class="qr-link" href="https://oauth.yandex.ru/authorize?response_type=token&client_id=23cabbbdc6cd418abb4b39c32c41195d" target="_blank">Получить Яндекс Токен</a>, скопируйте его и вставьте в поле выше.
+                    <b>Либо отсканируйте QR-код со смартфона:</b><br>
+                    После входа в Яндекс вы будете автоматически перенаправлены обратно, либо просто вставьте скопированную ссылку/токен в поле ниже:
                 </div>
+            </div>
+
+            <div class="input-group">
+                <input type="text" id="token-input" placeholder="Вставьте токен или всю ссылку целиком..." autocomplete="off" oninput="handleSmartInput(this.value)">
+                <button onclick="saveTokenManual()">Сохранить</button>
             </div>
         </div>
 
@@ -208,9 +245,45 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     </div>
 
     <script>
-        async function saveToken() {
-            const token = document.getElementById('token-input').value.trim();
-            if (!token) return alert('Введите токен!');
+        const CLIENT_ID = '23cabbbdc6cd418abb4b39c32c41195d';
+        const AUTH_URL = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${CLIENT_ID}`;
+
+        // Initialize login button and QR code
+        document.getElementById('btn-login-yandex').href = AUTH_URL;
+        document.getElementById('qr-code').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(AUTH_URL)}`;
+
+        // Automatically extract token if page loaded with #access_token
+        async function checkUrlHashToken() {
+            const hash = window.location.hash;
+            if (hash.includes('access_token=')) {
+                const match = hash.match(/access_token=([^&]+)/);
+                if (match && match[1]) {
+                    const token = match[1];
+                    await submitToken(token);
+                    window.history.replaceState(null, null, window.location.pathname);
+                }
+            }
+        }
+        checkUrlHashToken();
+
+        // Smart input: automatically handles raw token OR full URL with token
+        async function handleSmartInput(val) {
+            val = val.trim();
+            const tokenMatch = val.match(/y0_AgAAAA[a-zA-Z0-9_-]+/);
+            if (tokenMatch) {
+                document.getElementById('token-input').value = tokenMatch[0];
+                await submitToken(tokenMatch[0]);
+            }
+        }
+
+        async function saveTokenManual() {
+            const val = document.getElementById('token-input').value.trim();
+            const tokenMatch = val.match(/y0_AgAAAA[a-zA-Z0-9_-]+/) || [val];
+            if (!tokenMatch[0]) return alert('Вставьте токен или ссылку!');
+            await submitToken(tokenMatch[0]);
+        }
+
+        async function submitToken(token) {
             try {
                 const res = await fetch('/api/config/token', {
                     method: 'POST',
@@ -219,12 +292,14 @@ HTML_DASHBOARD = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 if (data.status === 'ok') {
-                    alert('Токен сохранен! Устройства перезапущены.');
                     document.getElementById('setup-wizard').style.display = 'none';
+                    const toast = document.getElementById('success-toast');
+                    toast.style.display = 'block';
+                    setTimeout(() => toast.style.display = 'none', 5000);
                     fetchStatus();
                 }
             } catch (e) {
-                alert('Ошибка: ' + e);
+                alert('Ошибка сохранения токена: ' + e);
             }
         }
 
@@ -250,6 +325,8 @@ HTML_DASHBOARD = """<!DOCTYPE html>
                 
                 if (!data.has_token) {
                     wizard.style.display = 'block';
+                } else {
+                    wizard.style.display = 'none';
                 }
 
                 if (data.speakers.length === 0) {
@@ -301,7 +378,7 @@ HTML_DASHBOARD = """<!DOCTYPE html>
 
 
 class StreamServer:
-    """Aiohttp server hosting Low-Latency HLS streams, web UI, and setup API."""
+    """Aiohttp server hosting Low-Latency HLS streams, web UI, and automatic OAuth callback."""
 
     def __init__(self, port: int = 8555, on_toggle=None, on_token_update=None, app_ref=None):
         self.port = port
@@ -314,6 +391,7 @@ class StreamServer:
 
     def _setup_routes(self):
         self.app.router.add_get('/', self._handle_index)
+        self.app.router.add_get('/auth/callback', self._handle_index)
         self.app.router.add_get('/health', self._handle_health)
         self.app.router.add_get('/api/speakers', self._handle_api_speakers)
         self.app.router.add_post('/api/speakers/{device_id}/toggle', self._handle_toggle)
@@ -354,8 +432,14 @@ class StreamServer:
     async def _handle_save_token(self, request):
         body = await request.json()
         token = body.get('token', '').strip()
+        
+        # Smart regex extraction in case full URL was sent to API
+        token_match = re.search(r'y0_AgAAAA[a-zA-Z0-9_-]+', token)
+        if token_match:
+            token = token_match.group(0)
+
         if not token:
-            return web.HTTPBadRequest(text="Token cannot be empty")
+            return web.HTTPBadRequest(text="Invalid token")
 
         if self.on_token_update:
             await self.on_token_update(token)
