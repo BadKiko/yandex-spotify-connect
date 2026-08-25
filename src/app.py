@@ -1,6 +1,7 @@
 """
 Main Entry Point for Yandex Spotify Connect.
-Coordinates Zeroconf discovery, Speaker bridges, Web setup wizard, and HTTP server.
+Coordinates Zeroconf discovery, AlexxIT Magic QR auth, Speaker bridges, and Web Server.
+If not authenticated, speakers are NOT created until QR login is completed.
 """
 
 import asyncio
@@ -15,6 +16,7 @@ from discovery import YandexDiscovery, SpeakerInfo
 from glagol import GlagolClient
 from spotify import SpeakerBridge
 from streamer import StreamServer
+from yandex_auth import YandexAuth
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,7 +32,6 @@ NAME_OVERRIDES = {
 
 
 def get_local_ip() -> str:
-    """Auto-detect host IP in local network."""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -56,13 +57,16 @@ class Application:
         disabled_list = self.config.get("disabled_speakers", ["1f82121ab18a11e40ff5"])
         self.disabled_speakers: Set[str] = set(disabled_list)
 
+        self.yandex_auth = YandexAuth()
         self.streamer = StreamServer(
             port=self.port,
             on_toggle=self.handle_speaker_toggle,
             on_token_update=self.handle_token_update,
+            yandex_auth=self.yandex_auth,
             app_ref=self
         )
         self.bridges: Dict[str, SpeakerBridge] = {}
+        self.pending_speakers: Dict[str, SpeakerInfo] = {}
         self.discovery: YandexDiscovery = None
         self._running = False
 
@@ -81,21 +85,27 @@ class Application:
             self.config["yandex_music_token"] = self.yandex_music_token
             with open(self.config_path, "w", encoding="utf-8") as f:
                 yaml.dump(self.config, f, allow_unicode=True)
-            logger.info("Saved configuration file successfully.")
+            logger.info("Saved configuration successfully.")
         except Exception as e:
             logger.error(f"Error saving config: {e}")
 
     async def handle_token_update(self, token: str):
-        """Called when user enters token in Web UI."""
+        """Called automatically when QR login succeeds or user inputs token."""
         self.yandex_music_token = token
         self._save_config()
+        logger.info("🔑 Yandex token activated! Launching all discovered speakers...")
+
+        # Initialize any pending discovered speakers
+        for speaker in list(self.pending_speakers.values()):
+            self._create_bridge(speaker)
+
         for bridge in self.bridges.values():
             bridge.glagol.music_token = token
             await bridge.glagol.fetch_glagol_token()
-        logger.info("Updated Yandex Music token across all active bridges.")
+            if not bridge._running and bridge.is_enabled:
+                bridge.start()
 
     async def handle_speaker_toggle(self, device_id: str, enable: bool):
-        """Called from Web UI when user toggles a speaker on/off."""
         if enable:
             self.disabled_speakers.discard(device_id)
         else:
@@ -107,7 +117,7 @@ class Application:
         if bridge:
             await bridge.set_enabled(enable)
 
-    def _on_speaker_found(self, speaker: SpeakerInfo):
+    def _create_bridge(self, speaker: SpeakerInfo):
         if speaker.device_id in self.bridges:
             return
 
@@ -138,17 +148,27 @@ class Application:
         self.bridges[speaker.device_id] = bridge
         self.streamer.register_bridge(speaker.device_id, bridge)
         bridge.start()
-        logger.info(f"Registered bridge: {name} ({speaker.ip}) [Enabled: {is_enabled}]")
+        logger.info(f"Registered & Started Spotify Bridge: {name} ({speaker.ip}) [Enabled: {is_enabled}]")
+
+    def _on_speaker_found(self, speaker: SpeakerInfo):
+        self.pending_speakers[speaker.device_id] = speaker
+        
+        # Only create bridge in Spotify if Yandex authorization is present
+        if not self.yandex_music_token:
+            logger.info(f"Discovered speaker {speaker.name} ({speaker.ip}) -> Waiting for Yandex QR Auth...")
+            return
+
+        self._create_bridge(speaker)
 
     async def start(self):
         logger.info("==================================================")
         logger.info("🚀 Starting Yandex Spotify Connect")
         logger.info(f"Host IP: {self.host_ip} | Stream Port: {self.port}")
+        logger.info(f"Has Yandex Auth: {bool(self.yandex_music_token)}")
         logger.info("==================================================")
 
         await self.streamer.start()
 
-        # Start Zeroconf discovery with running event loop
         self.discovery = YandexDiscovery(loop=asyncio.get_running_loop(), on_found=self._on_speaker_found)
         self.discovery.start()
 
@@ -168,6 +188,7 @@ class Application:
             self.discovery.stop()
         for b in self.bridges.values():
             await b.stop()
+        await self.yandex_auth.close()
         logger.info("Shutdown complete.")
 
 

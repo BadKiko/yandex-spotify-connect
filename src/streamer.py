@@ -1,6 +1,5 @@
 """
-HTTP Streaming Server and Modern Web Dashboard with 100% Automatic OAuth Login.
-Automatically extracts access_token from OAuth callback or pasted URLs with zero manual hassle.
+HTTP Streaming Server and Modern Web Dashboard with 100% Automatic Magic QR Authentication.
 """
 
 import asyncio
@@ -8,7 +7,6 @@ import json
 import logging
 import os
 import re
-import yaml
 from aiohttp import web
 from typing import Dict
 
@@ -32,7 +30,6 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             --danger: #e74c3c;
             --input-bg: #2a2a2a;
             --yandex: #fc3f1d;
-            --yandex-hover: #e03214;
         }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -133,73 +130,85 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             padding: 24px;
             margin-bottom: 24px;
         }
-        .setup-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+        .setup-title { font-size: 18px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
         .setup-desc { font-size: 14px; color: var(--subtext); line-height: 1.5; margin-bottom: 16px; }
-        .input-group { display: flex; gap: 10px; margin-top: 12px; }
+        .qr-section {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            margin-top: 16px;
+            padding: 20px;
+            background: #202020;
+            border-radius: 12px;
+            border: 1px solid #2e2e2e;
+        }
+        .qr-img {
+            width: 150px;
+            height: 150px;
+            background: #fff;
+            border-radius: 8px;
+            padding: 8px;
+        }
+        .qr-text { font-size: 14px; color: var(--text); line-height: 1.6; }
+        .qr-link { color: var(--accent); font-weight: 600; text-decoration: none; }
+        .qr-link:hover { text-decoration: underline; }
+        .pulse-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #f1c40f;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background: #f1c40f;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); opacity: 0.6; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.6; }
+        }
+        .success-toast {
+            background: rgba(29, 185, 84, 0.2);
+            border: 1px solid var(--accent);
+            color: #fff;
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            display: none;
+            font-weight: 600;
+        }
+        .input-manual {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+        }
         input[type="text"] {
             flex: 1;
             background: var(--input-bg);
             border: 1px solid var(--border);
             border-radius: 8px;
-            padding: 12px 14px;
+            padding: 10px 14px;
             color: #fff;
-            font-size: 14px;
+            font-size: 13px;
             outline: none;
         }
         input[type="text"]:focus { border-color: var(--accent); }
-        button {
-            background: var(--accent);
-            color: #000;
-            border: none;
+        .btn-save {
+            background: #333;
+            color: #fff;
+            border: 1px solid #444;
             border-radius: 8px;
-            padding: 12px 22px;
-            font-size: 14px;
-            font-weight: 700;
+            padding: 10px 18px;
+            font-size: 13px;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.2s ease;
         }
-        button:hover { background: var(--accent-hover); }
-        .btn-yandex {
-            background: var(--yandex);
-            color: #fff;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            text-decoration: none;
-            padding: 12px 20px;
-            border-radius: 8px;
-            font-weight: 700;
-            font-size: 14px;
-            transition: background 0.2s ease;
-        }
-        .btn-yandex:hover { background: var(--yandex-hover); }
-        .qr-section {
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid #2c2c2c;
-        }
-        .qr-img {
-            width: 120px;
-            height: 120px;
-            background: #fff;
-            border-radius: 8px;
-            padding: 6px;
-        }
-        .qr-text { font-size: 13px; color: var(--subtext); line-height: 1.5; }
-        .qr-link { color: var(--accent); font-weight: 600; text-decoration: none; }
-        .qr-link:hover { text-decoration: underline; }
-        .success-toast {
-            background: rgba(29, 185, 84, 0.15);
-            border: 1px solid var(--accent);
-            color: #fff;
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            display: none;
-        }
+        .btn-save:hover { background: #444; }
     </style>
 </head>
 <body>
@@ -207,38 +216,39 @@ HTML_DASHBOARD = """<!DOCTYPE html>
         <header>
             <h1>🎵 Yandex Spotify Connect</h1>
             <div style="display: flex; gap: 10px; align-items: center;">
-                <button onclick="toggleWizard()" style="padding: 6px 12px; font-size: 12px; background: #333; color: #fff; border: 1px solid #444;">⚙️ Сменить токен</button>
+                <button onclick="toggleWizard()" style="padding: 6px 12px; font-size: 12px; background: #333; color: #fff; border: 1px solid #444; border-radius: 6px; cursor: pointer;">⚙️ Сменить аккаунт</button>
                 <span class="badge">Standalone</span>
             </div>
         </header>
 
         <div id="success-toast" class="success-toast">
-            ✅ Токен успешно получен и сохранён! Колонки подключаются...
+            ✅ Авторизация успешна! Колонки созданы и подключены к Spotify.
         </div>
 
         <div id="setup-wizard" class="setup-box" style="display: none;">
-            <div class="setup-title">🔑 Авторизация Яндекс Станций</div>
+            <div class="setup-title">📱 Авторизация через QR-код (Автоматически)</div>
             <div class="setup-desc">
-                Для прямой связи с Яндекс Станциями по локальному протоколу Glagol выполните вход через Яндекс:
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <a id="btn-login-yandex" class="btn-yandex" href="#" target="_blank">
-                    🔴 Войти через Яндекс (Автоматически)
-                </a>
+                Наведите камеру смартфона на QR-код и подтвердите вход в аккаунт Яндекса. Токен подхватится <b>полностью автоматически</b> без копирования ссылок!
             </div>
 
             <div class="qr-section">
-                <img class="qr-img" id="qr-code" src="" alt="QR Code">
+                <img class="qr-img" id="qr-code" src="" alt="Загрузка QR-кода...">
                 <div class="qr-text">
-                    <b>Либо отсканируйте QR-код со смартфона:</b><br>
-                    После входа в Яндекс вы будете автоматически перенаправлены обратно, либо просто вставьте скопированную ссылку/токен в поле ниже:
+                    <b>Инструкция:</b><br>
+                    1. Отсканируйте QR-код камерой телефона или приложением Яндекс.<br>
+                    2. Нажмите <b>«Войти» / «Подтвердить»</b> на экране телефона.<br>
+                    <div class="pulse-status">
+                        <span class="pulse-dot"></span> Ожидание подтверждения с телефона...
+                    </div>
                 </div>
             </div>
 
-            <div class="input-group">
-                <input type="text" id="token-input" placeholder="Вставьте токен или всю ссылку целиком..." autocomplete="off" oninput="handleSmartInput(this.value)">
-                <button onclick="saveTokenManual()">Сохранить</button>
+            <div style="margin-top: 16px; font-size: 12px; color: var(--subtext);">
+                Или введите токен вручную, если QR-код недоступен:
+            </div>
+            <div class="input-manual">
+                <input type="text" id="token-input" placeholder="y0_AgAAAA..." autocomplete="off">
+                <button class="btn-save" onclick="saveTokenManual()">Сохранить</button>
             </div>
         </div>
 
@@ -248,66 +258,69 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     </div>
 
     <script>
-        const CLIENT_ID = '23cabbbdc6cd418abb4b39c32c41195d';
-        const AUTH_URL = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${CLIENT_ID}`;
+        let qrPollInterval = null;
 
-        // Initialize login button and QR code
-        document.getElementById('btn-login-yandex').href = AUTH_URL;
-        document.getElementById('qr-code').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(AUTH_URL)}`;
-
-        // Automatically extract token if page loaded with #access_token
-                function toggleWizard() {
+        function toggleWizard() {
             const w = document.getElementById('setup-wizard');
-            w.style.display = (w.style.display === 'none' || !w.style.display) ? 'block' : 'none';
+            const isHidden = (w.style.display === 'none' || !w.style.display);
+            w.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                loadQrCode();
+            }
         }
 
-        async function checkUrlHashToken() {
-            const hash = window.location.hash;
-            if (hash.includes('access_token=')) {
-                const match = hash.match(/access_token=([^&]+)/);
-                if (match && match[1]) {
-                    const token = match[1];
-                    await submitToken(token);
-                    window.history.replaceState(null, null, window.location.pathname);
+        async function loadQrCode() {
+            try {
+                const res = await fetch('/api/auth/qr');
+                const data = await res.json();
+                if (data.qr_url) {
+                    document.getElementById('qr-code').src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data.qr_url)}`;
+                    startQrPolling();
                 }
+            } catch (e) {
+                console.error("QR load error:", e);
             }
         }
-        checkUrlHashToken();
 
-        // Smart input: automatically handles raw token OR full URL with token
-        async function handleSmartInput(val) {
-            val = val.trim();
-            const tokenMatch = val.match(/y0_AgAAAA[a-zA-Z0-9_-]+/);
-            if (tokenMatch) {
-                document.getElementById('token-input').value = tokenMatch[0];
-                await submitToken(tokenMatch[0]);
-            }
+        function startQrPolling() {
+            if (qrPollInterval) clearInterval(qrPollInterval);
+            qrPollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch('/api/auth/qr_status');
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        clearInterval(qrPollInterval);
+                        qrPollInterval = null;
+                        document.getElementById('setup-wizard').style.display = 'none';
+                        const toast = document.getElementById('success-toast');
+                        toast.style.display = 'block';
+                        setTimeout(() => toast.style.display = 'none', 5000);
+                        fetchStatus();
+                    }
+                } catch (e) {
+                    console.error("QR poll error:", e);
+                }
+            }, 1500);
         }
 
         async function saveTokenManual() {
             const val = document.getElementById('token-input').value.trim();
             const tokenMatch = val.match(/y0_AgAAAA[a-zA-Z0-9_-]+/) || [val];
-            if (!tokenMatch[0]) return alert('Вставьте токен или ссылку!');
-            await submitToken(tokenMatch[0]);
-        }
-
-        async function submitToken(token) {
+            if (!tokenMatch[0]) return alert('Вставьте токен!');
+            
             try {
                 const res = await fetch('/api/config/token', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({token: token})
+                    body: JSON.stringify({token: tokenMatch[0]})
                 });
                 const data = await res.json();
                 if (data.status === 'ok') {
                     document.getElementById('setup-wizard').style.display = 'none';
-                    const toast = document.getElementById('success-toast');
-                    toast.style.display = 'block';
-                    setTimeout(() => toast.style.display = 'none', 5000);
                     fetchStatus();
                 }
             } catch (e) {
-                alert('Ошибка сохранения токена: ' + e);
+                alert('Ошибка: ' + e);
             }
         }
 
@@ -324,6 +337,7 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             }
         }
 
+        let wizardLoaded = false;
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/speakers');
@@ -333,12 +347,16 @@ HTML_DASHBOARD = """<!DOCTYPE html>
                 
                 if (!data.has_token) {
                     wizard.style.display = 'block';
+                    if (!wizardLoaded) {
+                        wizardLoaded = true;
+                        loadQrCode();
+                    }
                 } else {
                     wizard.style.display = 'none';
                 }
 
                 if (data.speakers.length === 0) {
-                    container.innerHTML = '<div class="empty-state">Поиск колонок в локальной сети...</div>';
+                    container.innerHTML = `<div class="empty-state">${data.has_token ? 'Поиск колонок в локальной сети...' : '🔒 Требуется авторизация Яндекс для создания колонок в Spotify.'}</div>`;
                     return;
                 }
 
@@ -386,22 +404,24 @@ HTML_DASHBOARD = """<!DOCTYPE html>
 
 
 class StreamServer:
-    """Aiohttp server hosting Low-Latency HLS streams, web UI, and automatic OAuth callback."""
+    """Aiohttp server hosting Low-Latency HLS streams, web UI, and AlexxIT Magic QR API."""
 
-    def __init__(self, port: int = 8555, on_toggle=None, on_token_update=None, app_ref=None):
+    def __init__(self, port: int = 8555, on_toggle=None, on_token_update=None, yandex_auth=None, app_ref=None):
         self.port = port
         self.bridges: Dict[str, object] = {}
         self.on_toggle = on_toggle
         self.on_token_update = on_token_update
+        self.yandex_auth = yandex_auth
         self.app_ref = app_ref
         self.app = web.Application()
         self._setup_routes()
 
     def _setup_routes(self):
         self.app.router.add_get('/', self._handle_index)
-        self.app.router.add_get('/auth/callback', self._handle_index)
         self.app.router.add_get('/health', self._handle_health)
         self.app.router.add_get('/api/speakers', self._handle_api_speakers)
+        self.app.router.add_get('/api/auth/qr', self._handle_get_qr)
+        self.app.router.add_get('/api/auth/qr_status', self._handle_qr_status)
         self.app.router.add_post('/api/speakers/{device_id}/toggle', self._handle_toggle)
         self.app.router.add_post('/api/config/token', self._handle_save_token)
         self.app.router.add_get('/stream/{device_id}.m3u8', self._handle_hls_playlist)
@@ -415,6 +435,29 @@ class StreamServer:
 
     async def _handle_health(self, request):
         return web.Response(text="OK")
+
+    async def _handle_get_qr(self, request):
+        if not self.yandex_auth:
+            return web.HTTPInternalServerError(text="Auth service unavailable")
+        try:
+            qr_link = await self.yandex_auth.get_qr()
+            return web.json_response({"qr_url": qr_link})
+        except Exception as e:
+            logger.error(f"Error generating QR link: {e}")
+            return web.HTTPInternalServerError(text=str(e))
+
+    async def _handle_qr_status(self, request):
+        if not self.yandex_auth:
+            return web.json_response({"status": "error"})
+        try:
+            token = await self.yandex_auth.check_qr_status()
+            if token:
+                if self.on_token_update:
+                    await self.on_token_update(token)
+                return web.json_response({"status": "ok", "token": token})
+            return web.json_response({"status": "waiting"})
+        except Exception as e:
+            return web.json_response({"status": "waiting", "error": str(e)})
 
     async def _handle_api_speakers(self, request):
         has_token = bool(self.app_ref and self.app_ref.yandex_music_token)
@@ -441,7 +484,6 @@ class StreamServer:
         body = await request.json()
         token = body.get('token', '').strip()
         
-        # Smart regex extraction in case full URL was sent to API
         token_match = re.search(r'y0_AgAAAA[a-zA-Z0-9_-]+', token)
         if token_match:
             token = token_match.group(0)
@@ -522,4 +564,4 @@ class StreamServer:
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', self.port)
         await site.start()
-        logger.info(f"HLS Server & Web UI ready at http://0.0.0.0:{self.port}")
+        logger.info(f"Magic QR Server & Web UI ready at http://0.0.0.0:{self.port}")
