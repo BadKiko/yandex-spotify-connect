@@ -206,7 +206,10 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     <div class="container">
         <header>
             <h1>🎵 Yandex Spotify Connect</h1>
-            <span class="badge">Standalone</span>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button onclick="toggleWizard()" style="padding: 6px 12px; font-size: 12px; background: #333; color: #fff; border: 1px solid #444;">⚙️ Сменить токен</button>
+                <span class="badge">Standalone</span>
+            </div>
         </header>
 
         <div id="success-toast" class="success-toast">
@@ -253,6 +256,11 @@ HTML_DASHBOARD = """<!DOCTYPE html>
         document.getElementById('qr-code').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(AUTH_URL)}`;
 
         // Automatically extract token if page loaded with #access_token
+                function toggleWizard() {
+            const w = document.getElementById('setup-wizard');
+            w.style.display = (w.style.display === 'none' || !w.style.display) ? 'block' : 'none';
+        }
+
         async function checkUrlHashToken() {
             const hash = window.location.hash;
             if (hash.includes('access_token=')) {
