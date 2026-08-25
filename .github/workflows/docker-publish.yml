@@ -25,7 +25,7 @@ jobs:
 
       - name: Build librespot binary
         run: |
-          cargo install librespot --no-default-features --root ./librespot_bin
+          cargo install --git https://github.com/librespot-org/librespot.git --tag v0.8.0 --locked --no-default-features --root ./librespot_bin
           cp ./librespot_bin/bin/librespot ./librespot
           chmod +x ./librespot
 
