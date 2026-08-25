@@ -20,8 +20,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU for multi-arch
-        uses: docker/setup-qemu-action@v3
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build librespot binary
+        run: |
+          cargo install librespot --no-default-features --root ./librespot_bin
+          cp ./librespot_bin/bin/librespot ./librespot
+          chmod +x ./librespot
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
