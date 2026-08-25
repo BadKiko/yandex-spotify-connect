@@ -1,5 +1,6 @@
 services:
   yandex-spotify-connect:
+    image: ghcr.io/badkiko/yandex-spotify-connect:latest
     build: .
     container_name: yandex_spotify_connect
     restart: unless-stopped
@@ -8,4 +9,3 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./cache:/app/cache
       - ./config.yaml:/app/config.yaml
-      - ./src:/app/src
