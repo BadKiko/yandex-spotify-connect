@@ -1,0 +1,17 @@
+# Secrets & Local Config
+config.yaml
+cache/
+credentials.json
+
+# Logs & Temp
+*.log
+/tmp/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,11 @@
+services:
+  yandex-spotify-connect:
+    build: .
+    container_name: yandex_spotify_connect
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./cache:/app/cache
+      - ./config.yaml:/app/config.yaml
+      - ./src:/app/src

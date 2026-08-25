@@ -1,0 +1,12 @@
+# Yandex Spotify Connect Configuration
+host_ip: "192.168.0.32"
+port: 8555
+bitrate: 320
+cache_dir: "./cache"
+librespot_bin: "/app/librespot"
+
+# Yandex Music OAuth token for local Glagol device conversation tokens
+yandex_music_token: "YOUR_YANDEX_MUSIC_TOKEN_HERE"
+
+# List of speaker device IDs to disable (optional)
+disabled_speakers: []
