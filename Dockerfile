@@ -18,14 +18,13 @@ RUN chmod +x /app/librespot
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copy source code and example config
 COPY src/ /app/src/
-COPY config.yaml /app/
+COPY config.example.yaml /app/config.yaml
 
 # Expose HTTP streaming port
 EXPOSE 8555
 
-# Set Python path and unbuffered output
 ENV PYTHONPATH=/app/src
 ENV PYTHONUNBUFFERED=1
 
